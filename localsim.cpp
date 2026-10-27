@@ -45,11 +45,6 @@ int main()
         velComp.insert(std::pair(ball,Velocity{1,1}));
         posComp.insert(std::pair(ball,Position{10,10}));
     }
-    
-    
-    
-
-
 
     auto prev = std::chrono::steady_clock::now();
     int tickCount = 0;
@@ -64,7 +59,7 @@ int main()
             tick();
             tickCount++;
             accumulator -= fixedDt;
-            if (tickCount % 1200 == 0) {
+            if (tickCount % 3600 == 0) {
                 prog = false;
             }
         }
