@@ -30,7 +30,7 @@ void onSigint(int) {
     shutdownReq = true;
 }
 
-void sim(Simulation& ballSim){
+void sim(Simulation& ballSim, std::function<void()> serveraction){
 
     sigset_t a;
     sigemptyset(&a);
@@ -41,7 +41,7 @@ void sim(Simulation& ballSim){
         return;
     }
 
-    ballSim.accumulatorLoop(shutdownReq);
+    ballSim.accumulatorLoop(shutdownReq,std::optional<std::function<void()>>(serveraction));
 }
 
 void keepAlive(SparseSet<sockaddr_in>& clients, const Connection& con, std::mutex& mtx){
@@ -119,9 +119,30 @@ int main()
         return 1;
     }
 
+    std::function broadcast = [&ballSim, &clients, &server, &mtx]() mutable{
+        std::vector<std::pair<size_t, Position>> snap = ballSim.snapshot();
+        std::string broadcastmsg;
+        broadcastmsg.resize(sizeof(UType) + sizeof(size_t) + snap.size() * sizeof(std::pair<size_t, Position>));
+        size_t snapSize = snap.size();
+        UType t = UType::Snapshot;
+        std::memcpy(broadcastmsg.data(), &t, sizeof(UType));
+        //copies snapsize into data
+        std::memcpy(broadcastmsg.data() + sizeof(UType), &snapSize, sizeof(snapSize)); 
+        //copy each element into broadcast
+        std::memcpy(broadcastmsg.data() + sizeof(UType) + sizeof(snapSize), snap.data(), snap.size() * sizeof(std::pair<size_t, Position>));
+
+        {
+            std::lock_guard lock(mtx);
+            for(auto& c : clients){
+            sockaddr* sp = reinterpret_cast<sockaddr*>(&c.second);
+            server->sendUDP(sp, sizeof(c.second),broadcastmsg);
+            }
+        }
+    };
+
     std::thread t(keepAlive,std::ref(clients), std::ref(*server), std::ref(mtx));
     curr_active_threads.push_back(std::move(t));
-    std::thread c(sim, std::ref(ballSim));
+    std::thread c(sim, std::ref(ballSim), std::ref(broadcast));
     curr_active_threads.push_back(std::move(c));
 
     while (!shutdownReq)
