@@ -184,29 +184,40 @@ int main()
             }
             break;
         case UType::Spawn:
-        {
-            std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable 
+            {
+                std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable 
+                {
+                    std::lock_guard lock(mtx);
+                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client); 
+                    Ping ping;
+                    std::memcpy(&ping, response.data(), sizeof(ping));
+                    auto comp = clients.getComponent(ping.id);
+                    if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
+                        {
+                            auto a = ballSim.spawn(ping.id);
+                            Ping c{UType::Success, a};
+                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                            server->sendUDP(sp, clientLen,view);
+                        }
+                    
+                };
+                gamingPub.addJob(job);
+            }
+            break;
+        case UType::Input:
             {
                 std::lock_guard lock(mtx);
-                sockaddr* sp = reinterpret_cast<sockaddr*>(&client); 
-                Ping ping;
-                std::memcpy(&ping, response.data(), sizeof(ping));
-                auto comp = clients.getComponent(ping.id);
+                sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                Input input;
+                std::memcpy(&input, response.data(),sizeof(input));
+                auto comp = clients.getComponent(input.cID);
                 if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
                     {
-                        auto a = ballSim.spawn(ping.id);
-                        Ping c{UType::Success, a};
+                        ballSim.inputSpeed(input.eID,input.v);
+                        Ping c{UType::Success, input.eID};
                         std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                         server->sendUDP(sp, clientLen,view);
                     }
-                
-            };
-            gamingPub.addJob(job);
-        }
-            break;
-        case UType::Position:
-            {
-                
             }
             break;
         case UType::React:
