@@ -120,16 +120,18 @@ int main()
     }
 
     std::function broadcast = [&ballSim, &clients, &server, &mtx]() mutable{
-        std::vector<std::pair<size_t, Position>> snap = ballSim.snapshot();
+        const auto snap = ballSim.snapshot();
+        using SnapValue = decltype(snap)::value_type;
+
         std::string broadcastmsg;
-        broadcastmsg.resize(sizeof(UType) + sizeof(size_t) + snap.size() * sizeof(std::pair<size_t, Position>));
+        broadcastmsg.resize(sizeof(UType) + sizeof(size_t) + snap.size() * sizeof(SnapValue));
         size_t snapSize = snap.size();
         UType t = UType::Snapshot;
         std::memcpy(broadcastmsg.data(), &t, sizeof(UType));
         //copies snapsize into data
-        std::memcpy(broadcastmsg.data() + sizeof(UType), &snapSize, sizeof(snapSize)); 
+        std::memcpy(broadcastmsg.data() + sizeof(UType), &snapSize, sizeof(snapSize));
         //copy each element into broadcast
-        std::memcpy(broadcastmsg.data() + sizeof(UType) + sizeof(snapSize), snap.data(), snap.size() * sizeof(std::pair<size_t, Position>));
+        std::memcpy(broadcastmsg.data() + sizeof(UType) + sizeof(snapSize), snap.data(), snap.size() * sizeof(SnapValue));
 
         {
             std::lock_guard lock(mtx);
@@ -195,6 +197,7 @@ int main()
                         if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
                         {
                             clients.extract(ping.id);
+
                             Ping c{UType::Disconnect, ping.id};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
@@ -235,7 +238,7 @@ int main()
                     auto comp = clients.getComponent(input.cID);
                     if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
                         {
-                            ballSim.inputSpeed(input.eID,input.v);
+                            ballSim.inputSpeed(input.eID, static_cast<const Velocity&>(input.v));
                             Ping c{UType::Success, input.eID};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
