@@ -206,18 +206,21 @@ int main()
             break;
         case UType::Input:
             {
-                std::lock_guard lock(mtx);
-                sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
-                Input input;
-                std::memcpy(&input, response.data(),sizeof(input));
-                auto comp = clients.getComponent(input.cID);
-                if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
-                    {
-                        ballSim.inputSpeed(input.eID,input.v);
-                        Ping c{UType::Success, input.eID};
-                        std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
-                        server->sendUDP(sp, clientLen,view);
-                    }
+                std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable {
+                    std::lock_guard lock(mtx);
+                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                    Input input;
+                    std::memcpy(&input, response.data(),sizeof(input));
+                    auto comp = clients.getComponent(input.cID);
+                    if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
+                        {
+                            ballSim.inputSpeed(input.eID,input.v);
+                            Ping c{UType::Success, input.eID};
+                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                            server->sendUDP(sp, clientLen,view);
+                        }
+                };
+                gamingPub.addJob(job);
             }
             break;
         case UType::React:
