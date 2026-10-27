@@ -30,7 +30,7 @@ void onSigint(int) {
     shutdownReq = true;
 }
 
-void sim(Simulation& ballSim, std::function<void()> serveraction){
+void sim(Simulation& ballSim, std::function<void()>& serveraction){
 
     sigset_t a;
     sigemptyset(&a);
