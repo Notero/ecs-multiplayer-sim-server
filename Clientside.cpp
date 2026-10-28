@@ -18,6 +18,45 @@
 
 std::atomic<bool> shutdownReq = false;
 
+void reciever(Connection& con){
+    sigset_t a;
+    sigemptyset(&a);
+    sigaddset(&a, SIGINT);
+    int pth = pthread_sigmask(SIG_BLOCK,&a,nullptr);
+    if(0 != pth){
+        std::cerr << std::strerror(pth) << std::endl;
+        return;
+    }
+
+    sockaddr_in sip{};
+    socklen_t slen = sizeof(sip);
+    sockaddr* sp = reinterpret_cast<sockaddr*>(&sip);
+
+    while (!shutdownReq)
+    {
+        std::string response;
+        con.recvUDP(sp,slen,response);
+
+        UType type;
+
+        std::memcpy(&type,&response,sizeof(type));
+        
+        switch (type)
+        {
+        case UType::Nugde:
+            
+            break;
+        case UType::Snapshot:
+            break;
+        case UType::Spawn:
+            break;
+        default:
+            break;
+        }
+
+
+    }
+}
 //signal for option+c or shutdown
 void onSigint(int) {
     shutdownReq = true;
@@ -25,6 +64,8 @@ void onSigint(int) {
 
 int main(){
     size_t ID;
+    std::vector<size_t> eID;
+    std::vector<std::thread> curr_active_threads;
 
     //signal connection SIGINT means Ctrl + c or option + c in macos
     struct sigaction sa{};          // zero it
@@ -66,8 +107,10 @@ int main(){
     client->recvUDP(ssp,esize,conRes);
     Ping z{};
     std::memcpy(&z,conRes.data(),sizeof(z));
-
+    
     ID = z.id;
+
+
 
     while (!shutdownReq)
     {
@@ -77,6 +120,11 @@ int main(){
     Ping d{UType::Disconnect, ID};
     std::string_view dview(reinterpret_cast<const char*>(&d), sizeof(d));
     client->sendUDP(sp,len,dview);
+
+    //thread safety comment out
+    for(auto& thr : curr_active_threads){
+        thr.join();
+    }
 
     return 0;
 }
