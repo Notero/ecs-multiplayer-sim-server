@@ -33,7 +33,7 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
     socklen_t slen = sizeof(sip);
     sockaddr* sp = reinterpret_cast<sockaddr*>(&sip);
     
-
+    unsigned int tickCount = 0;
     while (!shutdownReq)
     {
         std::string response;
@@ -42,7 +42,7 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
         UType type;
 
         std::memcpy(&type,response.data(),sizeof(type));
-        unsigned int tickCount = 0;
+        
         switch (type)
         {
         case UType::Nugde:
