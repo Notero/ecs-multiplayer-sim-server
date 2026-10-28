@@ -25,9 +25,6 @@ void onSigint(int) {
 
 int main(){
     size_t ID;
-    std::vector<std::thread> curr_active_threads;
-    Pub clientPub(10);
-    std::mutex mtx;
 
     //signal connection SIGINT means Ctrl + c or option + c in macos
     struct sigaction sa{};          // zero it
@@ -55,22 +52,31 @@ int main(){
     dest.sin_port = htons(3300);
     //htonl: same for 32-bit (long) values
     dest.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    const sockaddr* sp = reinterpret_cast<sockaddr*>(&dest);
+    socklen_t len = sizeof(dest);
+    sockaddr* sp = reinterpret_cast<sockaddr*>(&dest);
 
     Ping c{UType::Connect};
     std::string_view view(reinterpret_cast<const char*>(&c), sizeof(c));
-    client->sendUDP(sp,sizeof(dest),view);
+    client->sendUDP(sp,len,view);
     
+    std::string conRes;
+    sockaddr_in empty{};
+    socklen_t esize = sizeof(empty);
+    sockaddr* ssp = reinterpret_cast<sockaddr*>(&empty);
+    client->recvUDP(ssp,esize,conRes);
+    Ping z{};
+    std::memcpy(&z,conRes.data(),sizeof(z));
+
+    ID = z.id;
 
     while (!shutdownReq)
     {
 
     }
-    
 
-    // for(auto& thr : curr_active_threads){
-    //     thr.join();
-    // }
+    Ping d{UType::Disconnect, ID};
+    std::string_view dview(reinterpret_cast<const char*>(&d), sizeof(d));
+    client->sendUDP(sp,len,dview);
 
     return 0;
 }
