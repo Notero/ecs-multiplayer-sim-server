@@ -20,6 +20,7 @@
 #include "Simulation.hpp"
 #include "Structs.hpp"
 
+using TimePoint = std::chrono::steady_clock::time_point;
 
 
 std::atomic<bool> shutdownReq = false;
@@ -43,7 +44,7 @@ void sim(Simulation& ballSim, std::function<void()>& serveraction){
     ballSim.accumulatorLoop(shutdownReq,std::optional<std::function<void()>>(serveraction));
 }
 
-void keepAlive(SparseSet<sockaddr_in>& clients, const Connection& con, std::mutex& mtx){
+void keepAlive(SparseSet<sockaddr_in>& clients, const Connection& con, std::mutex& mtx, SparseSet<TimePoint>& timestamps, Simulation& ballSim){
     
     sigset_t a;
     sigemptyset(&a);
@@ -56,14 +57,29 @@ void keepAlive(SparseSet<sockaddr_in>& clients, const Connection& con, std::mute
 
     while(!shutdownReq){
         std::this_thread::sleep_for(std::chrono::seconds(20));
+
         {
             std::lock_guard lock(mtx);
+            std::vector<size_t> toKick;
             for(auto& a: clients){
                 const sockaddr* sp = reinterpret_cast<sockaddr*>(&a.second);
+                auto& prev = timestamps.getComponent(a.first);
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - prev);
+                if (elapsed >= std::chrono::seconds(60))
+                {
+                    toKick.push_back(a.first);
+                }
                 socklen_t len = sizeof(a.second);
                 Ping nudge{UType::Nugde, a.first};
                 std::string_view view(reinterpret_cast<const char*>(&nudge), sizeof(nudge));
                 con.sendUDP(sp,len,view);
+            }
+            for (size_t& i : toKick)
+            {
+                ballSim.killAll(i);
+                clients.extract(i);
+                timestamps.extract(i);
             }
         }
     }
@@ -77,6 +93,7 @@ int main()
     SparseSet<sockaddr_in> clients(1000);
     std::vector<std::thread> curr_active_threads;
     std::mutex mtx;
+    SparseSet<TimePoint> alive(1000);
     
     //signal connection SIGINT means Ctrl + c or option + c in macos
     struct sigaction sa{};          // zero it
@@ -141,7 +158,7 @@ int main()
         }
     };
 
-    std::thread t(keepAlive,std::ref(clients), std::ref(*server), std::ref(mtx));
+    std::thread t(keepAlive,std::ref(clients), std::ref(*server), std::ref(mtx), std::ref(alive), std::ref(ballSim));
     curr_active_threads.push_back(std::move(t));
     std::thread c(sim, std::ref(ballSim), std::ref(broadcast));
     curr_active_threads.push_back(std::move(c));
@@ -164,7 +181,7 @@ int main()
             {
                 //mutable is needed copy of a client needed but lambda always captures const
                 //mutable makes them not const ?
-                std::function job = [&servergen,&clients,client,clientLen,&server,&mtx]() mutable
+                std::function job = [&servergen,&clients,client,clientLen,&server,&mtx,&alive]() mutable
                 {
                     sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
                     //generate a unique id to client and add it to clients set
@@ -173,6 +190,7 @@ int main()
                         std::lock_guard lock(mtx);
                         clientId = servergen.getUID();
                         clients.insert(std::pair<size_t,sockaddr_in>(clientId,client));
+                        alive.insert(std::pair<size_t,TimePoint>(clientId,std::chrono::steady_clock::now()));
                     }
                     
                     //send the id back to client
@@ -185,7 +203,7 @@ int main()
             break;
         case UType::Disconnect:
             {
-                std::function job = [response,&clients,&mtx,client,&server,clientLen,&ballSim]() mutable
+                std::function job = [response,&clients,&mtx,client,&server,clientLen,&ballSim,&alive]() mutable
                 {
                     sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
                     Ping ping;
@@ -197,6 +215,7 @@ int main()
                         {
                             clients.extract(ping.id);
                             ballSim.killAll(ping.id);
+                            alive.extract(ping.id);
                             Ping c{UType::Disconnect, ping.id};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
@@ -248,7 +267,7 @@ int main()
             break;
         case UType::React:
             {
-                std::function job = [response,&clients,&mtx,client,&server,clientLen]() mutable 
+                std::function job = [response,&clients,&mtx,client,&server,clientLen,&alive]() mutable 
                 {
                     sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
                     Ping react;
@@ -261,6 +280,8 @@ int main()
                             Ping c{UType::Success, react.id};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
+                            auto& timestamp = alive.getComponent(react.id);
+                            timestamp = std::chrono::steady_clock::now();
                         }
                     }
                 };
