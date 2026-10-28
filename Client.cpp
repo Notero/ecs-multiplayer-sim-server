@@ -11,14 +11,22 @@
 #include <cstdio>
 #include <pthread.h>
 #include <format>
+#include <chrono>
 #include <csignal>
 #include "Connection.hpp"
 #include "Pub.hpp"
 #include "Structs.hpp"
+#include "ORingBuffer.hpp"
 
 std::atomic<bool> shutdownReq = false;
+using TimePoint = std::chrono::steady_clock::time_point;
 
-void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& mtx){
+struct Snapshot{
+    std::vector<std::pair<size_t, Position>> snapshot;
+    TimePoint timestamp = std::chrono::steady_clock::now();
+};
+
+void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& mtx, ORingBuffer<Snapshot>& snaps){
     
     sigset_t a;
     sigemptyset(&a);
@@ -59,8 +67,14 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
                 std::memcpy(&count, response.data() + sizeof(UType), sizeof(count));
                 std::vector<std::pair<size_t, Position>> rv(count);
                 std::memcpy(rv.data(), response.data() + sizeof(count) + sizeof(UType), count * sizeof(std::pair<size_t, Position>));
+                Snapshot s{rv};
+                {
+                    std::lock_guard lock(mtx);
+                    snaps.push(s);
+                }
+
                 tickCount++;
-                if (tickCount % 120 == 0) 
+                if (tickCount % 10 == 0) 
                 {
                     for(auto& r: rv){
                         std::cout << "entity id==" << r.first << " | Position x" << r.second.x << " y" << r.second.y << std::endl;
@@ -90,11 +104,14 @@ void onSigint(int) {
     shutdownReq = true;
 }
 
-int main(){
+int main()
+{
     size_t ID;
     std::vector<size_t> eID;
     std::vector<std::thread> curr_active_threads;
     std::mutex mtx;
+
+    ORingBuffer<Snapshot> snapshots(10);
 
     //signal connection SIGINT means Ctrl + c or option + c in macos
     struct sigaction sa{};          // zero it
@@ -139,7 +156,7 @@ int main(){
     
     ID = z.id;
 
-    std::thread t(reciever, std::ref(*client),std::ref(ID), std::ref(eID), std::ref(mtx));
+    std::thread t(reciever, std::ref(*client),std::ref(ID), std::ref(eID), std::ref(mtx), std::ref(snapshots));
     curr_active_threads.push_back(std::move(t));
 
 
