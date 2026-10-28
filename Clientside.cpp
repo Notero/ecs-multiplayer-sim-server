@@ -18,7 +18,7 @@
 
 std::atomic<bool> shutdownReq = false;
 
-void reciever(Connection& con){
+void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID){
     sigset_t a;
     sigemptyset(&a);
     sigaddset(&a, SIGINT);
@@ -39,16 +39,33 @@ void reciever(Connection& con){
 
         UType type;
 
-        std::memcpy(&type,&response,sizeof(type));
+        std::memcpy(&type,response.data(),sizeof(type));
         
         switch (type)
         {
         case UType::Nugde:
-            
+            {
+                Ping react{UType::React,ID};
+                std::string_view view(reinterpret_cast<const char*>(&react), sizeof(react));
+                con.sendUDP(sp, slen, view);
+            }
             break;
         case UType::Snapshot:
+            {
+                // Later, on the receiving side:
+                size_t count;
+                std::memcpy(&count, response.data() + sizeof(UType), sizeof(count));
+                std::vector<std::pair<size_t, Position>> rv(count);
+                std::memcpy(rv.data(), response.data() + sizeof(count) + sizeof(UType), count * sizeof(std::pair<size_t, Position>));
+                /* update screen.*/
+            }
             break;
         case UType::Spawn:
+            {
+                Ping spawn{};
+                std::memcpy(&spawn,response.data(),sizeof(spawn));
+                eID.push_back(spawn.id);
+            }
             break;
         default:
             break;
@@ -110,6 +127,8 @@ int main(){
     
     ID = z.id;
 
+    std::thread t(reciever, std::ref(*client),std::ref(ID), std::ref(eID));
+    curr_active_threads.push_back(std::move(t));
 
 
     while (!shutdownReq)
