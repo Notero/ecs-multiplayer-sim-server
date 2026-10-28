@@ -32,6 +32,7 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
     sockaddr_in sip{};
     socklen_t slen = sizeof(sip);
     sockaddr* sp = reinterpret_cast<sockaddr*>(&sip);
+    
 
     while (!shutdownReq)
     {
@@ -41,7 +42,7 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
         UType type;
 
         std::memcpy(&type,response.data(),sizeof(type));
-        
+        unsigned int tickCount = 0;
         switch (type)
         {
         case UType::Nugde:
@@ -58,7 +59,13 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& 
                 std::memcpy(&count, response.data() + sizeof(UType), sizeof(count));
                 std::vector<std::pair<size_t, Position>> rv(count);
                 std::memcpy(rv.data(), response.data() + sizeof(count) + sizeof(UType), count * sizeof(std::pair<size_t, Position>));
-                /* update screen.*/
+                tickCount++;
+                if (tickCount % 120 == 0) 
+                {
+                    for(auto& r: rv){
+                        std::cout << "entity id==" << r.first << " | Position x" << r.second.x << " y" << r.second.y << std::endl;
+                    }
+                }
             }
             break;
         case UType::Spawn:
