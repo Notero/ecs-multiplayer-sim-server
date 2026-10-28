@@ -218,7 +218,7 @@ int main()
                     if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
                         {
                             auto a = ballSim.spawn(ping.id);
-                            Ping c{UType::Success, a};
+                            Ping c{UType::Spawn, a};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
                         }
