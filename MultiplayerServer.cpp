@@ -10,7 +10,6 @@
 #include <atomic>
 #include <cstdio>
 #include <pthread.h>
-#include <sodium.h>
 #include <format>
 #include <csignal>
 #include <chrono>
@@ -186,7 +185,7 @@ int main()
             break;
         case UType::Disconnect:
             {
-                std::function job = [response,&clients,&mtx,client,&server,clientLen]() mutable
+                std::function job = [response,&clients,&mtx,client,&server,clientLen,&ballSim]() mutable
                 {
                     sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
                     Ping ping;
@@ -197,7 +196,7 @@ int main()
                         if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
                         {
                             clients.extract(ping.id);
-
+                            ballSim.killAll(ping.id);
                             Ping c{UType::Disconnect, ping.id};
                             std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
                             server->sendUDP(sp, clientLen,view);
