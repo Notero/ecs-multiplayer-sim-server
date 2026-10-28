@@ -18,7 +18,8 @@
 
 std::atomic<bool> shutdownReq = false;
 
-void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID){
+void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID, std::mutex& mtx){
+    
     sigset_t a;
     sigemptyset(&a);
     sigaddset(&a, SIGINT);
@@ -64,7 +65,10 @@ void reciever(Connection& con, size_t& ID,std::vector<size_t>& eID){
             {
                 Ping spawn{};
                 std::memcpy(&spawn,response.data(),sizeof(spawn));
-                eID.push_back(spawn.id);
+                {
+                    std::lock_guard lock(mtx);
+                    eID.push_back(spawn.id);
+                }
             }
             break;
         default:
@@ -83,6 +87,7 @@ int main(){
     size_t ID;
     std::vector<size_t> eID;
     std::vector<std::thread> curr_active_threads;
+    std::mutex mtx;
 
     //signal connection SIGINT means Ctrl + c or option + c in macos
     struct sigaction sa{};          // zero it
@@ -127,19 +132,65 @@ int main(){
     
     ID = z.id;
 
-    std::thread t(reciever, std::ref(*client),std::ref(ID), std::ref(eID));
+    std::thread t(reciever, std::ref(*client),std::ref(ID), std::ref(eID), std::ref(mtx));
     curr_active_threads.push_back(std::move(t));
 
 
     while (!shutdownReq)
     {
-
+        std::cout << "Hello |" << std::endl;
+        std::cout << "-------" << std::endl;
+        std::cout << "1. Spawn Ball, 2. Add Speed to A ball, 3. Disconnect" << std::endl;
+        int a;
+        std::cin >> a;
+        switch (a)
+        {
+        case 1:
+            {
+                Ping p{UType::Spawn, ID};
+                std::string_view v(reinterpret_cast<const char*>(&p),sizeof(p));
+                client->sendUDP(sp,len,v);
+            }
+            break;
+        case 2:
+            {
+                std::cout << "ID list for owned balls" << std::endl;
+                {
+                    std::lock_guard lock(mtx);
+                    for(auto& entity: eID){
+                        std::cout << entity << std::endl;
+                    }
+                }
+                double x,y;
+                size_t entityID;
+                std::cout << "-----------------------------------" << std::endl;
+                std::cout << "Enter entity ID from the list above" << std::endl;
+                std::cin >> entityID;
+                std::cout << "Enter speed towards x" << std::endl;
+                std::cin >> x;
+                std::cout << "Enter speed towards y" << std::endl;
+                std::cin >> y;
+                Input i{UType::Input, Velocity{x,y}, ID, entityID};
+                std::string_view v(reinterpret_cast<const char*>(&i),sizeof(i));
+                client->sendUDP(sp, len, v);
+            }
+            break;
+        case 3:
+            {
+                shutdownReq.store(true);
+            }
+            break;        
+        default:
+            std::cout << "Wrong Input" << std::endl;
+            break;
+        }
     }
 
     Ping d{UType::Disconnect, ID};
     std::string_view dview(reinterpret_cast<const char*>(&d), sizeof(d));
     client->sendUDP(sp,len,dview);
 
+    shutdown(client->get_fd(), SHUT_RDWR);
     //thread safety comment out
     for(auto& thr : curr_active_threads){
         thr.join();
