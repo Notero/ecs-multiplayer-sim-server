@@ -88,6 +88,7 @@ void keepAlive(SparseSet<sockaddr_in>& clients, const Connection& con, std::mute
 int main()
 {
     Pub gamingPub(10);
+    Pub selectionPub(3);
     Simulation ballSim;
     UIDGenerator servergen;
     SparseSet<sockaddr_in> clients(1000);
@@ -171,126 +172,128 @@ int main()
         std::string response;
         server->recvUDP(sp,clientLen,response);
 
-        //peaks
-        UType type;
-        std::memcpy(&type, response.data(), sizeof(UType));
+        std::function<void()> selector = [response,&servergen,&clients,client,clientLen,&server,&mtx,&alive,&gamingPub,&ballSim]() mutable {
+            UType type;
+            std::memcpy(&type, response.data(), sizeof(UType));
 
-        switch (type)
-        {
-        case UType::Connect:
+            switch (type)
             {
-                //mutable is needed copy of a client needed but lambda always captures const
-                //mutable makes them not const ?
-                std::function job = [&servergen,&clients,client,clientLen,&server,&mtx,&alive]() mutable
+            case UType::Connect:
                 {
-                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
-                    //generate a unique id to client and add it to clients set
-                    size_t clientId;
+                    //mutable is needed copy of a client needed but lambda always captures const
+                    //mutable makes them not const ?
+                    std::function job = [&servergen,&clients,client,clientLen,&server,&mtx,&alive]() mutable
+                    {
+                        sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                        //generate a unique id to client and add it to clients set
+                        size_t clientId;
+                        {
+                            std::lock_guard lock(mtx);
+                            clientId = servergen.getUID();
+                            clients.insert(std::pair<size_t,sockaddr_in>(clientId,client));
+                            alive.insert(std::pair<size_t,TimePoint>(clientId,std::chrono::steady_clock::now()));
+                        }
+                        
+                        //send the id back to client
+                        Ping c{UType::Connect,clientId};
+                        std::string_view view(reinterpret_cast<const char*>(&c), sizeof(c));
+                        server->sendUDP(sp, clientLen,view);
+                    };
+                    gamingPub.addJob(job);
+                }
+                break;
+            case UType::Disconnect:
+                {
+                    std::function job = [response,&clients,&mtx,client,&server,clientLen,&ballSim,&alive]() mutable
+                    {
+                        sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                        Ping ping;
+                        std::memcpy(&ping, response.data(), sizeof(ping));
+                        {
+                            std::lock_guard lock(mtx);
+                            auto comp = clients.getComponent(ping.id);
+                            if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
+                            {
+                                clients.extract(ping.id);
+                                ballSim.killAll(ping.id);
+                                alive.extract(ping.id);
+                                Ping c{UType::Disconnect, ping.id};
+                                std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                                server->sendUDP(sp, clientLen,view);
+                            }
+                        }
+                    };
+                    gamingPub.addJob(job);
+                }
+                break;
+            case UType::Spawn:
+                {
+                    std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable 
                     {
                         std::lock_guard lock(mtx);
-                        clientId = servergen.getUID();
-                        clients.insert(std::pair<size_t,sockaddr_in>(clientId,client));
-                        alive.insert(std::pair<size_t,TimePoint>(clientId,std::chrono::steady_clock::now()));
-                    }
-                    
-                    //send the id back to client
-                    Ping c{UType::Connect,clientId};
-                    std::string_view view(reinterpret_cast<const char*>(&c), sizeof(c));
-                    server->sendUDP(sp, clientLen,view);
-                };
-                gamingPub.addJob(job);
-            }
-            break;
-        case UType::Disconnect:
-            {
-                std::function job = [response,&clients,&mtx,client,&server,clientLen,&ballSim,&alive]() mutable
-                {
-                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
-                    Ping ping;
-                    std::memcpy(&ping, response.data(), sizeof(ping));
-                    {
-                        std::lock_guard lock(mtx);
+                        sockaddr* sp = reinterpret_cast<sockaddr*>(&client); 
+                        Ping ping;
+                        std::memcpy(&ping, response.data(), sizeof(ping));
                         auto comp = clients.getComponent(ping.id);
                         if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
-                        {
-                            clients.extract(ping.id);
-                            ballSim.killAll(ping.id);
-                            alive.extract(ping.id);
-                            Ping c{UType::Disconnect, ping.id};
-                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
-                            server->sendUDP(sp, clientLen,view);
-                        }
-                    }
-                };
-                gamingPub.addJob(job);
-            }
-            break;
-        case UType::Spawn:
-            {
-                std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable 
+                            {
+                                auto a = ballSim.spawn(ping.id);
+                                Ping c{UType::Spawn, a};
+                                std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                                server->sendUDP(sp, clientLen,view);
+                            }
+                        
+                    };
+                    gamingPub.addJob(job);
+                }
+                break;
+            case UType::Input:
                 {
-                    std::lock_guard lock(mtx);
-                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client); 
-                    Ping ping;
-                    std::memcpy(&ping, response.data(), sizeof(ping));
-                    auto comp = clients.getComponent(ping.id);
-                    if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
-                        {
-                            auto a = ballSim.spawn(ping.id);
-                            Ping c{UType::Spawn, a};
-                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
-                            server->sendUDP(sp, clientLen,view);
-                        }
-                    
-                };
-                gamingPub.addJob(job);
-            }
-            break;
-        case UType::Input:
-            {
-                std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable {
-                    std::lock_guard lock(mtx);
-                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
-                    Input input;
-                    std::memcpy(&input, response.data(),sizeof(input));
-                    auto comp = clients.getComponent(input.cID);
-                    if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
-                        {
-                            ballSim.inputSpeed(input.eID, static_cast<const Velocity&>(input.v));
-                            Ping c{UType::Success, input.eID};
-                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
-                            server->sendUDP(sp, clientLen,view);
-                        }
-                };
-                gamingPub.addJob(job);
-            }
-            break;
-        case UType::React:
-            {
-                std::function job = [response,&clients,&mtx,client,&server,clientLen,&alive]() mutable 
-                {
-                    sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
-                    Ping react;
-                    std::memcpy(&react,response.data(),sizeof(react));
-                    {
+                    std::function job = [response,&clients,client,&server,clientLen,&ballSim,&mtx]() mutable {
                         std::lock_guard lock(mtx);
-                        auto comp = clients.getComponent(react.id);
+                        sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                        Input input;
+                        std::memcpy(&input, response.data(),sizeof(input));
+                        auto comp = clients.getComponent(input.cID);
                         if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
-                        {   
-                            Ping c{UType::Success, react.id};
-                            std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
-                            server->sendUDP(sp, clientLen,view);
-                            auto& timestamp = alive.getComponent(react.id);
-                            timestamp = std::chrono::steady_clock::now();
+                            {
+                                ballSim.inputSpeed(input.eID, static_cast<const Velocity&>(input.v));
+                                Ping c{UType::Success, input.eID};
+                                std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                                server->sendUDP(sp, clientLen,view);
+                            }
+                    };
+                    gamingPub.addJob(job);
+                }
+                break;
+            case UType::React:
+                {
+                    std::function job = [response,&clients,&mtx,client,&server,clientLen,&alive]() mutable 
+                    {
+                        sockaddr* sp = reinterpret_cast<sockaddr*>(&client);
+                        Ping react;
+                        std::memcpy(&react,response.data(),sizeof(react));
+                        {
+                            std::lock_guard lock(mtx);
+                            auto comp = clients.getComponent(react.id);
+                            if (comp.sin_port == client.sin_port && comp.sin_addr.s_addr == client.sin_addr.s_addr) 
+                            {   
+                                Ping c{UType::Success, react.id};
+                                std::string_view view(reinterpret_cast<const char*>(&c),sizeof(c));
+                                server->sendUDP(sp, clientLen,view);
+                                auto& timestamp = alive.getComponent(react.id);
+                                timestamp = std::chrono::steady_clock::now();
+                            }
                         }
-                    }
-                };
-                gamingPub.addJob(job);
+                    };
+                    gamingPub.addJob(job);
+                }
+                break;
+            default:
+                break;
             }
-            break;
-        default:
-            break;
-        }
+        };
+        selectionPub.addJob(selector);
     }
     
     
