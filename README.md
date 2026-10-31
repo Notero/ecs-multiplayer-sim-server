@@ -22,7 +22,7 @@ A server-authoritative multiplayer prototype over UDP: a sparse-set ECS simulati
 - `library/Client.hpp`/`.cpp` — client-side connection/receive loop
 - `library/UIDGenerator.hpp` — entity/client ID allocation
 
-Shared components live in [library](https://github.com/Notero/library), included here as a git submodule.
+Shared components live in [akinlib](https://github.com/Notero/akinlib), included here as a git submodule.
 
 ## Build
 
