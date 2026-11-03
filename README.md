@@ -32,12 +32,26 @@ git clone --recurse-submodules https://github.com/Notero/ecs-multiplayer-sim-ser
 
 (or `git submodule update --init` after a plain clone)
 
-This repo's `CMakeLists.txt` currently defines the `mserver`/`mclient`/`swarm`/`localsim` targets only — a top-level `CMakeLists.txt` wiring this project together with `library` as a subdirectory is not yet included here.
+```
+cmake -S . -B build
+cmake --build build
+```
 
 ## Run
 
 ```
-./mserver      # starts the UDP server on 127.0.0.1:3300
-./mclient      # interactive client
-./swarm <clientCount> <roundCount>   # load test
+./build/mserver      # starts the UDP server on 127.0.0.1:3300
+./build/mclient      # interactive client
+./build/swarm <clientCount> <roundCount>   # load test
 ```
+
+## Results
+
+- ECS component storage (sparse-set, no virtual dispatch) ran ~3x faster than an OOP/virtual-dispatch baseline at 1M entities
+- Idle-loop CPU usage cut from ~100% to ~0.2% after moving off a busy-wait tick loop
+- `swarm(50, 5)` (50 simulated clients, 5 rounds) teardown time cut from 100+ s to 14.4 s
+
+## Known limitations / next steps
+
+- No client-side interpolation yet — client renders raw server snapshots
+- IPv4 localhost only; no NAT traversal or public-internet transport

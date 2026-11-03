@@ -1,3 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+project(ecs_multiplayer_sim_server CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_subdirectory(library)
+
 add_executable(localsim localsim.cpp)
 add_executable(mserver MultiplayerServer.cpp)
 add_executable(mclient Launcher.cpp)
