@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <format>
 #include <csignal>
+#include <cstring>
 #include <chrono>
 #include "Pub.hpp"
 #include "Connection.hpp"
